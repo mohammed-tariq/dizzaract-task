@@ -1,0 +1,10 @@
+node_modules
+dist
+out
+.DS_Store
+.eslintcache
+*.log*
+
+# PocketBase local data (binary + migrations are committed)
+pocketbase/pb_data
+pocketbase/pb_migrations/*.js.map
