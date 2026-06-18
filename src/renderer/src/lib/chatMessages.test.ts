@@ -3,7 +3,8 @@ import {
   appendOptimisticMessage,
   createOptimisticUserMessage,
   finalizeSentMessages,
-  rollbackOptimisticMessage
+  rollbackOptimisticMessage,
+  sortMessages
 } from './chatMessages'
 import type { Message } from '../types/message'
 
@@ -11,7 +12,8 @@ function persistedMessage(
   id: string,
   role: 'user' | 'assistant',
   content: string,
-  conversationId = 'conv-1'
+  conversationId = 'conv-1',
+  sequence?: number
 ): Message {
   const now = '2026-06-17T12:00:00.000Z'
   return {
@@ -22,13 +24,14 @@ function persistedMessage(
     updated: now,
     conversation: conversationId,
     role,
-    content
+    content,
+    sequence
   }
 }
 
 describe('chatMessages optimistic helpers', () => {
   it('appends an optimistic user message immediately', () => {
-    const optimistic = createOptimisticUserMessage('conv-1', 'Hello', 'temp-1')
+    const optimistic = createOptimisticUserMessage('conv-1', 'Hello', 'temp-1', 100)
     const messages = appendOptimisticMessage([], optimistic)
 
     expect(messages).toHaveLength(1)
@@ -41,7 +44,7 @@ describe('chatMessages optimistic helpers', () => {
   })
 
   it('rolls back the optimistic message on simulated failure', () => {
-    const optimistic = createOptimisticUserMessage('conv-1', 'Hello', 'temp-1')
+    const optimistic = createOptimisticUserMessage('conv-1', 'Hello', 'temp-1', 100)
     let messages = appendOptimisticMessage(
       [persistedMessage('msg-0', 'assistant', 'Earlier reply')],
       optimistic
@@ -57,11 +60,11 @@ describe('chatMessages optimistic helpers', () => {
   })
 
   it('replaces the optimistic message with persisted user and assistant messages', () => {
-    const optimistic = createOptimisticUserMessage('conv-1', 'Hello', 'temp-1')
+    const optimistic = createOptimisticUserMessage('conv-1', 'Hello', 'temp-1', 100)
     const messages = appendOptimisticMessage([], optimistic)
 
-    const userMessage = persistedMessage('msg-user', 'user', 'Hello')
-    const assistantMessage = persistedMessage('msg-ai', 'assistant', '**Echo:** Hello')
+    const userMessage = persistedMessage('msg-user', 'user', 'Hello', 'conv-1', 1)
+    const assistantMessage = persistedMessage('msg-ai', 'assistant', '**Echo:** Hello', 'conv-1', 2)
 
     const finalized = finalizeSentMessages(messages, 'temp-1', userMessage, assistantMessage)
 
@@ -74,7 +77,7 @@ describe('chatMessages optimistic helpers', () => {
   it('models the full optimistic send flow: show, then rollback on error', () => {
     const messages = appendOptimisticMessage(
       [],
-      createOptimisticUserMessage('conv-1', 'Will fail', 'temp-fail')
+      createOptimisticUserMessage('conv-1', 'Will fail', 'temp-fail', 200)
     )
 
     expect(messages[0].optimistic).toBe(true)
@@ -82,5 +85,15 @@ describe('chatMessages optimistic helpers', () => {
     const rolledBack = rollbackOptimisticMessage(messages, 'temp-fail')
 
     expect(rolledBack).toEqual([])
+  })
+
+  it('sorts messages by sequence when reloading from PocketBase', () => {
+    const sorted = sortMessages([
+      persistedMessage('msg-ai', 'assistant', 'third', 'conv-1', 3),
+      persistedMessage('msg-user', 'user', 'first', 'conv-1', 1),
+      persistedMessage('msg-ai-2', 'assistant', 'second', 'conv-1', 2)
+    ])
+
+    expect(sorted.map((message) => message.id)).toEqual(['msg-user', 'msg-ai-2', 'msg-ai'])
   })
 })

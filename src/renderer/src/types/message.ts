@@ -6,6 +6,8 @@ export interface Message extends RecordModel {
   conversation: string
   role: MessageRole
   content: string
+  /** Monotonic client-assigned order key for stable sorting across reloads. */
+  sequence?: number
 }
 
 export interface ChatMessage extends Message {

@@ -16,6 +16,11 @@ export default function ChatPanel({ conversationId, title }: ChatPanelProps): Re
   const scrollContainerRef = useRef<HTMLDivElement>(null)
   const bottomRef = useRef<HTMLDivElement>(null)
 
+  const isLoading = status === 'loading'
+  const isSending = status === 'sending'
+  const conversationMessages = messages.filter((message) => message.conversation === conversationId)
+  const showEmpty = status === 'ready' && conversationMessages.length === 0
+
   useEffect(() => {
     void loadMessages(conversationId)
   }, [conversationId, loadMessages])
@@ -27,16 +32,12 @@ export default function ChatPanel({ conversationId, title }: ChatPanelProps): Re
     }
 
     container.scrollTop = container.scrollHeight
-  }, [messages, status])
+  }, [conversationMessages, status])
 
   const handleSend = async (content: string): Promise<void> => {
     await sendMessage(conversationId, content)
     void bumpConversationToTop(conversationId)
   }
-
-  const isLoading = status === 'loading'
-  const isSending = status === 'sending'
-  const showEmpty = status === 'ready' && messages.length === 0
 
   return (
     <Box
@@ -99,7 +100,9 @@ export default function ChatPanel({ conversationId, title }: ChatPanelProps): Re
         )}
 
         {!isLoading &&
-          messages.map((message) => <MessageBubble key={message.id} message={message} />)}
+          conversationMessages.map((message) => (
+            <MessageBubble key={message.id} message={message} />
+          ))}
 
         <div ref={bottomRef} />
       </Box>

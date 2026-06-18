@@ -4,7 +4,8 @@ import {
   appendOptimisticMessage,
   createOptimisticUserMessage,
   finalizeSentMessages,
-  rollbackOptimisticMessage
+  rollbackOptimisticMessage,
+  sortMessages
 } from '../lib/chatMessages'
 import { formatChatError } from '../lib/chatErrors'
 import { requestMockReply } from '../lib/mockAi'
@@ -35,7 +36,12 @@ export const useChatStore = create<ChatState>((set) => ({
   loadedConversationId: null,
 
   loadMessages: async (conversationId) => {
-    set({ status: 'loading', error: null, loadedConversationId: conversationId })
+    set({
+      status: 'loading',
+      error: null,
+      loadedConversationId: conversationId,
+      messages: []
+    })
 
     try {
       const messages = await pb.collection('messages').getFullList<Message>({
@@ -43,25 +49,33 @@ export const useChatStore = create<ChatState>((set) => ({
         requestKey: null
       })
 
-      messages.sort((a, b) => {
-        const aTime = a.created ? new Date(a.created).getTime() : 0
-        const bTime = b.created ? new Date(b.created).getTime() : 0
-        return aTime - bTime
-      })
+      const sorted = sortMessages(messages)
 
-      set({
-        messages,
-        status: 'ready',
-        loadedConversationId: conversationId
+      set((state) => {
+        if (state.loadedConversationId !== conversationId) {
+          return state
+        }
+
+        return {
+          messages: sorted,
+          status: 'ready',
+          loadedConversationId: conversationId
+        }
       })
     } catch (error) {
       if (isCancelledRequest(error)) {
         return
       }
-      set({
-        status: 'error',
-        error: formatChatError(error),
-        loadedConversationId: conversationId
+      set((state) => {
+        if (state.loadedConversationId !== conversationId) {
+          return state
+        }
+
+        return {
+          status: 'error',
+          error: formatChatError(error),
+          loadedConversationId: conversationId
+        }
       })
     }
   },
@@ -73,13 +87,29 @@ export const useChatStore = create<ChatState>((set) => ({
     }
 
     const tempId = `optimistic-${crypto.randomUUID()}`
-    const optimisticMessage = createOptimisticUserMessage(conversationId, trimmed, tempId)
+    const userSequence = Date.now()
+    const optimisticMessage = createOptimisticUserMessage(
+      conversationId,
+      trimmed,
+      tempId,
+      userSequence
+    )
 
-    set((state) => ({
-      messages: appendOptimisticMessage(state.messages, optimisticMessage),
-      status: 'sending',
-      error: null
-    }))
+    set((state) => {
+      const base = {
+        status: 'sending' as const,
+        error: null
+      }
+
+      if (state.loadedConversationId !== conversationId) {
+        return base
+      }
+
+      return {
+        ...base,
+        messages: appendOptimisticMessage(state.messages, optimisticMessage)
+      }
+    })
 
     let userMessage: Message | null = null
 
@@ -87,7 +117,8 @@ export const useChatStore = create<ChatState>((set) => ({
       userMessage = await pb.collection('messages').create<Message>({
         conversation: conversationId,
         role: 'user',
-        content: trimmed
+        content: trimmed,
+        sequence: userSequence
       })
 
       const reply = await requestMockReply(trimmed)
@@ -95,18 +126,25 @@ export const useChatStore = create<ChatState>((set) => ({
       const assistantMessage = await pb.collection('messages').create<Message>({
         conversation: conversationId,
         role: 'assistant',
-        content: reply
+        content: reply,
+        sequence: userSequence + 1
       })
 
-      set((state) => ({
-        messages: finalizeSentMessages(
-          state.messages,
-          tempId,
-          userMessage as Message,
-          assistantMessage
-        ),
-        status: 'ready'
-      }))
+      set((state) => {
+        if (state.loadedConversationId !== conversationId) {
+          return { status: 'ready' }
+        }
+
+        return {
+          messages: finalizeSentMessages(
+            state.messages,
+            tempId,
+            userMessage as Message,
+            assistantMessage
+          ),
+          status: 'ready'
+        }
+      })
     } catch (error) {
       if (userMessage) {
         try {
@@ -116,11 +154,17 @@ export const useChatStore = create<ChatState>((set) => ({
         }
       }
 
-      set((state) => ({
-        messages: rollbackOptimisticMessage(state.messages, tempId),
-        status: 'ready',
-        error: formatChatError(error)
-      }))
+      set((state) => {
+        if (state.loadedConversationId !== conversationId) {
+          return { status: 'ready', error: formatChatError(error) }
+        }
+
+        return {
+          messages: rollbackOptimisticMessage(state.messages, tempId),
+          status: 'ready',
+          error: formatChatError(error)
+        }
+      })
     }
   },
 

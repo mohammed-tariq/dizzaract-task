@@ -1,9 +1,33 @@
 import type { ChatMessage, Message } from '../types/message'
 
+export function messageSortKey(message: ChatMessage): number {
+  if (typeof message.sequence === 'number' && !Number.isNaN(message.sequence)) {
+    return message.sequence
+  }
+
+  if (message.created) {
+    return new Date(message.created).getTime()
+  }
+
+  return 0
+}
+
+export function sortMessages(messages: ChatMessage[]): ChatMessage[] {
+  return [...messages].sort((a, b) => {
+    const diff = messageSortKey(a) - messageSortKey(b)
+    if (diff !== 0) {
+      return diff
+    }
+
+    return a.id.localeCompare(b.id)
+  })
+}
+
 export function createOptimisticUserMessage(
   conversationId: string,
   content: string,
-  tempId: string
+  tempId: string,
+  sequence: number
 ): ChatMessage {
   const now = new Date().toISOString()
 
@@ -16,6 +40,7 @@ export function createOptimisticUserMessage(
     conversation: conversationId,
     role: 'user',
     content,
+    sequence,
     optimistic: true
   }
 }
@@ -37,5 +62,9 @@ export function finalizeSentMessages(
   userMessage: Message,
   assistantMessage: Message
 ): ChatMessage[] {
-  return [...messages.filter((message) => message.id !== tempId), userMessage, assistantMessage]
+  return sortMessages([
+    ...messages.filter((message) => message.id !== tempId),
+    userMessage,
+    assistantMessage
+  ])
 }
